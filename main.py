@@ -7,6 +7,13 @@ from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input
 
+class TimeCell:
+    def __init__(self, date):
+        self.date = pd.to_datetime(date)
+        self.day = self.date.day
+        self.month = self.date.month
+        self.year = self.date.year
+
 class WeatherApp:
     def __init__(self, root):
         self.root = root
@@ -26,41 +33,36 @@ class WeatherApp:
 
     def load_dataset(self):
         self.filepath = filedialog.askopenfilename()
-        self.data = pd.read_csv(self.filepath)
-        self.result_label.config(text="Veri seti yüklendi!")
+        if self.filepath:
+            self.data = pd.read_csv(self.filepath)
+            self.result_label.config(text="Veri seti yüklendi!")
+        else:
+            messagebox.showerror("Hata", "Dosya seçilmedi.")
 
     def run_model(self):
         try:
-            # Eksik verileri doldurma
             self.data = self.data.ffill()
 
-            # Gerekli sütunları seçme
-            self.data['date'] = pd.to_datetime(self.data['date'])
-            self.data['day'] = self.data['date'].dt.day
-            self.data['month'] = self.data['date'].dt.month
-            self.data['year'] = self.data['date'].dt.year
+            self.data['timecell'] = self.data['date'].apply(TimeCell)
 
-            # Hedef değişkenlerin belirlenmesi
             y_temp_max = self.data['temp_max']
             y_temp_min = self.data['temp_min']
             y_weather = self.data['weather']
 
-            # Label encoding for categorical target variable
             label_encoder = LabelEncoder()
             y_weather_encoded = label_encoder.fit_transform(y_weather)
 
-            # Özelliklerin belirlenmesi
-            X = self.data[['precipitation', 'wind', 'day', 'month', 'year']]
+            X = self.data[['precipitation', 'wind']].copy()
+            X['day'] = self.data['timecell'].apply(lambda x: x.day)
+            X['month'] = self.data['timecell'].apply(lambda x: x.month)
+            X['year'] = self.data['timecell'].apply(lambda x: x.year)
 
-            # Veriyi normalize etme
             scaler = MinMaxScaler()
             X_scaled = scaler.fit_transform(X)
 
-            # Eğitim ve test verilerini ayırma
             X_train, X_test, y_train_max, y_test_max, y_train_min, y_test_min, y_train_weather, y_test_weather = train_test_split(
                 X_scaled, y_temp_max, y_temp_min, y_weather_encoded, test_size=0.2, random_state=42)
 
-            # Modeli oluşturma
             model_max = Sequential()
             model_max.add(Input(shape=(X_train.shape[1],)))
             model_max.add(Dense(64, activation='relu'))
@@ -82,29 +84,23 @@ class WeatherApp:
             model_weather.add(Dense(len(label_encoder.classes_), activation='softmax'))
             model_weather.compile(loss='sparse_categorical_crossentropy', optimizer='adam')
 
-            # Modelleri eğitme
             model_max.fit(X_train, y_train_max, epochs=50, batch_size=10)
             model_min.fit(X_train, y_train_min, epochs=50, batch_size=10)
             model_weather.fit(X_train, y_train_weather, epochs=50, batch_size=10)
 
-            # Tahminler
             predictions_max = model_max.predict(X_test)
             predictions_min = model_min.predict(X_test)
             predictions_weather = model_weather.predict(X_test)
             predictions_weather_labels = label_encoder.inverse_transform(np.argmax(predictions_weather, axis=1))
 
-            # Hava durumu tahminlerini Türkçeleştirme
             weather_translation = {
                 "rain": "Yağmurlu",
                 "sun": "Güneşli",
                 "snow": "Karlı",
-                # Diğer hava durumu koşullarını buraya ekleyin
             }
 
-            # İleri tarihleri hesaplama
             future_dates = pd.date_range(start="2024-07-01", periods=len(predictions_max), freq='D')
 
-            # Sonuçları formatlama
             result_str = ""
             for i in range(len(predictions_max)):
                 date = future_dates[i].strftime("%d.%m.%Y")
